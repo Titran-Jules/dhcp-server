@@ -1,0 +1,22 @@
+## Plan d'adressage
+
+* Réseau : 192.168.50.0/24
+(Plage RFC 1918, peu commune donc faible risque de collision avec le LAN extérireur).
+
+* Masque : 255.255.255.0 (/24) 
+(masque large pour permettre une bonne visibilité des tests).
+
+* IP statique serveur DHCP : 192.168.50.1
+(on a donné la 1ère adresse diponible au serveur DHCP)
+
+* Plage DHCP (range) : 192.168.50.100 à 192.168.50.149
+(50 adresses disponibles, largement suffisant pour un test à plusieurs clients simultanés).
+
+* DNS : 1.1.1.1 + 8.8.8.8 
+(Cloudflare + Google)
+
+* default-lease-time : 180s (3min)
+(Court pour observer plusieurs cycles de renouvellement pendant la session de test).
+
+* max-lease-time : 360s (6min)
+(Le double du défaut, évite qu'un client s'accroche trop longtemps à un bail pendant les manipulations).
