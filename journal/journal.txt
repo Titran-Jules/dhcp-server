@@ -80,3 +80,32 @@ bash :
     11) sudo apt update
     12) sudo apt install isc-dhcp-server -y
 
+* Configuration du serveur :
+ - sudo nano /etc/default/isc-dhcp-server
+ - Trouve la ligne INTERFACESv4="" et modifie-la en :
+INTERFACESv4="ens33"
+ - sauvegarder et écrire dhcp.conf
+ - sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.orig
+   sudo nano /etc/dhcp/dhcpd.conf
+ - mettre à la fin de la ligne : 
+default-lease-time 300;
+max-lease-time 600;
+
+subnet 192.168.50.0 netmask 255.255.255.0 {
+  range 192.168.50.100 192.168.50.149;
+  option routers 192.168.50.1;
+  option domain-name-servers 1.1.1.1, 8.8.8.8;
+}
+
+ - Redemarrer le service : 
+sudo systemctl restart isc-dhcp-server
+sudo systemctl status isc-dhcp-server
+
+ - Activer le démarrage auto : sudo systemctl enable isc-dhcp-server
+ - Vérifier le fichier de baux (encore vide, normal, aucun client connecté) : cat /var/lib/dhcp/dhcpd.leases
+
+ - Eteignez la VM et effacer le NAT qu'on a configuré
+
+
+* Configuration UBUNTU (client)
+
