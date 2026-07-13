@@ -1,18 +1,20 @@
+# Journal de bord — TP DHCP
+
 ## Plan d'adressage
 
 * Réseau : 192.168.50.0/24
-(Plage RFC 1918, peu commune donc faible risque de collision avec le LAN extérireur).
+(Plage RFC 1918, peu commune donc faible risque de collision avec le LAN extérieur).
 
-* Masque : 255.255.255.0 (/24) 
+* Masque : 255.255.255.0 (/24)
 (masque large pour permettre une bonne visibilité des tests).
 
 * IP statique serveur DHCP : 192.168.50.1
-(on a donné la 1ère adresse diponible au serveur DHCP)
+(on a donné la 1ère adresse disponible au serveur DHCP)
 
 * Plage DHCP (range) : 192.168.50.100 à 192.168.50.149
 (50 adresses disponibles, largement suffisant pour un test à plusieurs clients simultanés).
 
-* DNS : 1.1.1.1 + 8.8.8.8 
+* DNS : 1.1.1.1 + 8.8.8.8
 (Cloudflare + Google)
 
 * default-lease-time : 180s (3min)
@@ -21,73 +23,135 @@
 * max-lease-time : 360s (6min)
 (Le double du défaut, évite qu'un client s'accroche trop longtemps à un bail pendant les manipulations).
 
+**À prévoir plus tard :** réservation MAC hors de la plage dynamique, par exemple `192.168.50.10`, pour un client identifié.
+
 ---
 
-## Configuration du réseau
+## Configuration du réseau (hôte VMware)
+
 * Dans Edit -> Virtual Network Editor
-* Séléction de vmnet1 comme réseau car il est dèjà sur HOST-ONLY (permet de ne pas interférer avec les réseaux LAN externe.
-* Désactivé USE local DHCP service to distribute IP adresses to VMs (permet de créer manuellement le serveur DHCP)
-* Désactivé Connect a host virtual adapter (vmnet1) to this network
+* Sélection de vmnet1 comme réseau car il est déjà en HOST-ONLY (permet de ne pas interférer avec les réseaux LAN externes)
+* Désactivé "Use local DHCP service to distribute IP addresses to VMs" (permet de créer manuellement le serveur DHCP)
+* Désactivé "Connect a host virtual adapter (vmnet1) to this network"
 
-## Création du VM debian
-* nom : debian-dhcp-server
-* nombre de processeur : 1
-* ram : 1024 mo
-* mémoire : 20 go (store virtual disk as a singe file)
+### Problème rencontré : modules VMware non chargés
+
+Symptôme : Virtual Network Editor refuse de s'ouvrir avec l'erreur *"Network configuration is missing. Ensure that /etc/vmware/networking exists"*.
+
+Cause : conflit entre KVM (chargé par défaut sous Arch/EndeavourOS) et les modules VMware (`vmmon`, `vmnet`) — les deux se disputent l'accès aux extensions de virtualisation matérielle.
+
+```bash
+# Décharger KVM
+sudo modprobe -r kvm_intel
+sudo modprobe -r kvm
+
+# Empêcher KVM de se recharger au démarrage
+echo "blacklist kvm_intel" | sudo tee /etc/modprobe.d/blacklist-kvm.conf
+echo "blacklist kvm" | sudo tee -a /etc/modprobe.d/blacklist-kvm.conf
+
+# Recompiler/installer les modules VMware
+sudo vmware-modconfig --console --install-all
+
+# Vérifier
+lsmod | grep vm
+sudo systemctl enable --now vmware-networks.service
+```
+
+**Bonne pratique :** si `Virtual Network Editor` refuse de s'ouvrir ou qu'un réseau custom (ex. VMnet2) n'apparaît pas dans la liste des adaptateurs de VM, vérifier `lsmod | grep vm` en premier réflexe.
+
+---
+
+## Création de la VM Debian (serveur)
+
+* Nom : debian-dhcp-server
+* Nombre de processeurs : 1
+* RAM : 1024 Mo
+* Disque : 20 Go (store virtual disk as a single file)
+* Réseau : Custom → vmnet1 (à régler dans "Customize Hardware" **avant** de démarrer la VM)
 * Installation texte (Install et non Graphical Install)
-* Toujours français + zone géographique Autre -> Océan Indien -> Madagascar
+* Langue française + zone géographique Autre -> Océan Indien -> Madagascar
 
-* Configuration manuelle du réseau
-    - IP : 192.168.50.1
-    - masque : 255.255.255.0
-    - passerelle : 192.168.50.1
-    - DNS : 1.1.1.1
-    - nom de machine : debian-server
-    - domaine : lab.local
-    - laisser le miroire réseau échoué et skipper
-    - installer GRUD sur le disque principal /dev/sda
+### Configuration manuelle du réseau pendant l'installeur
+- IP : 192.168.50.1
+- Masque : 255.255.255.0
+- Passerelle : 192.168.50.1
+- DNS : 1.1.1.1
+- Nom de machine : debian-server
+- Domaine : lab.local
+- Laisser le miroir réseau échouer et skipper (normal, pas d'accès Internet sur ce réseau isolé à ce stade)
+- Installer GRUB sur le disque principal /dev/sda
+- Tasksel : ne cocher que "SSH server" + "standard system utilities", décocher tout environnement graphique
 
-bash :
- ip a
- On devrait voir ens33 sur le petit 2 avec inet 192.168.50.1
+### Vérification après premier démarrage
+```bash
+ip a
+# On doit voir ens33 avec inet 192.168.50.1/24 en état UP
+```
 
-* Installation de sudo
-    0) Au cas où, mettez vous sur root : bash : su -
-    1) clique doite sur debian-dhcp-server -> settings -> + Add -> Network Adapter et régler sur NAT (permet l'accès à internet)
-    2) bash : ip a 
-    Vérifier le nom (pour moi ens36)
-    il faut lui donner une IP car elle est sur DOWN.
-    3) bash : ip link set ens36 up
-    4) mettre CD/DVD dans settings sur Connected
-    5) Monté le disque : mount /dev/cdrom /media/cdrom
-    6) installer sudo : apt install sudo -y
-    7) bash : su -
-    8) usermod -aG sudo <nom_utilisateru>
-    9) exit, puis encore exit, tester avec sudo whoami, si ça répond root, c'est bon.
+**⚠️ Point de vigilance :** sur une première tentative, l'installeur a laissé `ens33` sans IP et en état DOWN malgré la saisie manuelle. Si ça arrive :
+```bash
+sudo nano /etc/network/interfaces
+# Ajouter :
+#   auto ens33
+#   iface ens33 inet static
+#       address 192.168.50.1
+#       netmask 255.255.255.0
+sudo ip link set ens33 up
+sudo systemctl restart networking
+```
 
-* Installer isc-dhcp-server
-    1) Aller dans Edit -> Virtual Network Editor -> regarder vmnet8 -> Mémoriser le Subnet IP et NAT settings -> Gateway IP
-    2) bash : sudo ip addr add <l'IP mémorisée mais mettez .100 à la fin avec le masque /24> dev ens36
-    3) bash : sudo ip route add default via <Gateway IP> dev ens36
-    4) bash : echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
-    5) tester ping -c 8.8.8.8
-    6) Vérifier ip link show ens36
-    7) Si down, redemarrer et entrer dans la VM, bash : sudo ip link set ens36 up
-    7) Recommencer l'étape 2, 3 et 4
-    8) Seul le CD est dans /etc/apt/sources.list, il faut ajouter les dépôts Debian officiels : sudo nano /etc/apt/sources.list
-    9) Ajouter cette ligne dedans : deb http://deb.debian.org/debian trixie main
-    10) sauvegarder et quitter
-    11) sudo apt update
-    12) sudo apt install isc-dhcp-server -y
+---
 
-* Configuration du serveur :
- - sudo nano /etc/default/isc-dhcp-server
- - Trouve la ligne INTERFACESv4="" et modifie-la en :
-INTERFACESv4="ens33"
- - sauvegarder et écrire dhcp.conf
- - sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.orig
-   sudo nano /etc/dhcp/dhcpd.conf
- - mettre à la fin de la ligne : 
+## Installation de sudo
+
+0. Au cas où le compte utilisateur n'a pas les droits : se mettre en root avec `su -`
+1. Clic droit sur debian-dhcp-server → Settings → Add → Network Adapter, régler sur NAT (accès Internet temporaire)
+2. `ip a` pour identifier le nom de la nouvelle interface (ex. ens36)
+3. Si elle est DOWN : `sudo ip link set ens36 up`
+4. CD/DVD (Settings) sur Connected, avec l'ISO Debian netinst utilisée à l'installation
+5. Monter le disque : `mount /dev/cdrom /media/cdrom`
+6. Installer sudo : `apt install sudo -y`
+7. `su -`
+8. `usermod -aG sudo <nom_utilisateur>`
+9. `exit`, puis fermer complètement la session utilisateur et se reconnecter (les groupes ne sont recalculés qu'à l'ouverture d'une nouvelle session, pas en cours de session active). Tester avec `sudo whoami` : si ça répond `root`, c'est bon.
+
+**Bonne pratique à vérifier dès la prochaine install :** l'installeur Debian propose parfois une case "donner les privilèges administrateur à cet utilisateur" — cocher cette option évite tout ce détour.
+
+---
+
+## Installation d'isc-dhcp-server
+
+1. Edit → Virtual Network Editor → regarder VMnet8 → mémoriser Subnet IP et NAT settings → Gateway IP
+2. `sudo ip addr add <IP mémorisée avec .100 à la fin>/24 dev ens36`
+3. `sudo ip route add default via <Gateway IP> dev ens36`
+4. `echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf`
+5. Tester : `ping -c 3 8.8.8.8`
+6. Vérifier `ip link show ens36`
+7. Si DOWN de façon persistante malgré `ip link set up` (état `NO-CARRIER` visible) : **éteindre complètement la VM** (`sudo poweroff`) et la rallumer entièrement — un simple "Restart Guest" ne suffit pas toujours à renégocier le lien virtuel d'une carte ajoutée à chaud
+8. Recommencer les étapes 2, 3 et 4 après redémarrage (l'IP manuelle ne persiste pas au reboot)
+9. Seul le CD est dans `/etc/apt/sources.list` par défaut, il faut ajouter les dépôts Debian officiels : `sudo nano /etc/apt/sources.list`
+10. Ajouter la ligne : `deb http://deb.debian.org/debian trixie main`
+11. Sauvegarder et quitter
+12. `sudo apt update`
+13. `sudo apt install isc-dhcp-server -y`
+
+**Note :** `isc-dhcp-client` (fournissant `dhclient`) et `tcpdump` ne sont pas non plus présents sur l'image netinst — même procédure NAT si besoin de les installer.
+
+---
+
+## Configuration du serveur DHCP
+
+```bash
+sudo nano /etc/default/isc-dhcp-server
+# Trouver INTERFACESv4="" et modifier en :
+# INTERFACESv4="ens33"
+
+sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.orig
+sudo nano /etc/dhcp/dhcpd.conf
+```
+
+Ajouter à la fin du fichier :
+```
 default-lease-time 300;
 max-lease-time 600;
 
@@ -96,19 +160,71 @@ subnet 192.168.50.0 netmask 255.255.255.0 {
   option routers 192.168.50.1;
   option domain-name-servers 1.1.1.1, 8.8.8.8;
 }
+```
 
- - Redemarrer le service : 
+```bash
 sudo systemctl restart isc-dhcp-server
 sudo systemctl status isc-dhcp-server
+sudo systemctl enable isc-dhcp-server
 
- - Activer le démarrage auto : sudo systemctl enable isc-dhcp-server
- - Vérifier le fichier de baux (encore vide, normal, aucun client connecté) : cat /var/lib/dhcp/dhcpd.leases
- - sudo apt install tcpdump -y
- - Eteignez la VM et effacer le NAT qu'on a configuré
+# Vérifier le fichier de baux (vide au départ, normal)
+cat /var/lib/dhcp/dhcpd.leases
 
+# Installer tcpdump pendant qu'on a encore l'accès NAT
+sudo apt install tcpdump -y
+```
 
-* Configuration UBUNTU (client)
- - ram : 4-6 go
- - mémoire : 20 go
+Une fois isc-dhcp-server, sudo et tcpdump installés : éteindre la VM et **retirer la carte réseau NAT** dans Settings — retour à l'isolation totale du réseau, conforme à l'exigence de l'énoncé.
 
+---
 
+## Configuration de la VM Ubuntu (client)
+
+* RAM : 4-6 Go (3-4 Go suffisant pour un second client de test uniquement, sans usage bureautique complet)
+* Disque : 20-25 Go
+* Réseau : Custom → vmnet1 dès la création (même réseau isolé que le serveur)
+* Installation graphique standard, "Effacer le disque et installer Ubuntu" (sans risque, c'est le disque virtuel dédié à la VM, pas le disque physique hôte)
+
+### Problème rencontré : le client reste bloqué en adresse APIPA (169.254.x.x)
+
+Symptôme : `ip a` affiche une adresse `169.254.x.x/16` au lieu d'une IP dans la plage DHCP — signe que le client n'a **jamais envoyé** de requête DHCP (auto-assignation link-local par défaut en cas d'échec ou d'absence de tentative).
+
+**Démarche de diagnostic suivie :**
+```bash
+# 1. Vérifier le réglage réseau de la VM (Settings -> Network Adapter -> Custom -> vmnet1)
+#    fait des deux côtés (client ET serveur), les deux doivent être sur le MEME vmnet
+
+# 2. Capturer le trafic brut côté serveur pour voir si la requête arrive
+sudo tcpdump -i ens33 -n -e port 67 or port 68
+
+# 3. Forcer une nouvelle demande côté client, en observant le terminal tcpdump
+sudo nmcli connection down netplan-ens33
+sudo nmcli connection up netplan-ens33
+
+# 4. Si tcpdump reste muet : vérifier la méthode IPv4 configurée côté client
+nmcli connection show netplan-ens33 | grep ipv4
+```
+
+**Cause trouvée :** la méthode IPv4 de la connexion était réglée sur `link-local` au lieu de `auto` (DHCP) — NetworkManager ne tentait donc **jamais** d'envoyer de DHCPDISCOVER, il s'auto-assignait directement une adresse APIPA sans essayer.
+
+**Correction :**
+```bash
+sudo nmcli connection modify netplan-ens33 ipv4.method auto
+sudo nmcli connection up netplan-ens33
+ip a
+# On doit voir une adresse dans 192.168.50.100-149
+```
+
+### Vérification complète une fois corrigé
+```bash
+# Côté client
+ip a
+
+# Côté serveur, capture DORA complète (à lancer avant de relancer la connexion côté client)
+sudo tcpdump -i ens33 -n -e port 67 or port 68
+
+# Côté serveur, vérifier le bail attribué
+cat /var/lib/dhcp/dhcpd.leases
+```
+
+---
