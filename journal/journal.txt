@@ -20,3 +20,63 @@
 
 * max-lease-time : 360s (6min)
 (Le double du défaut, évite qu'un client s'accroche trop longtemps à un bail pendant les manipulations).
+
+---
+
+## Configuration du réseau
+* Dans Edit -> Virtual Network Editor
+* Séléction de vmnet1 comme réseau car il est dèjà sur HOST-ONLY (permet de ne pas interférer avec les réseaux LAN externe.
+* Désactivé USE local DHCP service to distribute IP adresses to VMs (permet de créer manuellement le serveur DHCP)
+* Désactivé Connect a host virtual adapter (vmnet1) to this network
+
+## Création du VM debian
+* nom : debian-dhcp-server
+* nombre de processeur : 1
+* ram : 1024 mo
+* mémoire : 20 go (store virtual disk as a singe file)
+* Installation texte (Install et non Graphical Install)
+* Toujours français + zone géographique Autre -> Océan Indien -> Madagascar
+
+* Configuration manuelle du réseau
+    - IP : 192.168.50.1
+    - masque : 255.255.255.0
+    - passerelle : 192.168.50.1
+    - DNS : 1.1.1.1
+    - nom de machine : debian-server
+    - domaine : lab.local
+    - laisser le miroire réseau échoué et skipper
+    - installer GRUD sur le disque principal /dev/sda
+
+bash :
+ ip a
+ On devrait voir ens33 sur le petit 2 avec inet 192.168.50.1
+
+* Installation de sudo
+    0) Au cas où, mettez vous sur root : bash : su -
+    1) clique doite sur debian-dhcp-server -> settings -> + Add -> Network Adapter et régler sur NAT (permet l'accès à internet)
+    2) bash : ip a 
+    Vérifier le nom (pour moi ens36)
+    il faut lui donner une IP car elle est sur DOWN.
+    3) bash : ip link set ens36 up
+    4) mettre CD/DVD dans settings sur Connected
+    5) Monté le disque : mount /dev/cdrom /media/cdrom
+    6) installer sudo : apt install sudo -y
+    7) bash : su -
+    8) usermod -aG sudo <nom_utilisateru>
+    9) exit, puis encore exit, tester avec sudo whoami, si ça répond root, c'est bon.
+
+* Installer isc-dhcp-server
+    1) Aller dans Edit -> Virtual Network Editor -> regarder vmnet8 -> Mémoriser le Subnet IP et NAT settings -> Gateway IP
+    2) bash : sudo ip addr add <l'IP mémorisée mais mettez .100 à la fin avec le masque /24> dev ens36
+    3) bash : sudo ip route add default via <Gateway IP> dev ens36
+    4) bash : echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+    5) tester ping -c 8.8.8.8
+    6) Vérifier ip link show ens36
+    7) Si down, redemarrer et entrer dans la VM, bash : sudo ip link set ens36 up
+    7) Recommencer l'étape 2, 3 et 4
+    8) Le message est clair : seul le CD est dans /etc/apt/sources.list, il faut ajouter les dépôts Debian officiels : sudo nano /etc/apt/sources.list
+    9) Ajouter cette ligne dedans : deb http://deb.debian.org/debian trixie main
+    10) sauvegarder et quitter
+    11) sudo apt update
+    12) sudo apt install isc-dhcp-server -y
+
