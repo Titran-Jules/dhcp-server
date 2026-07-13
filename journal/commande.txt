@@ -1,0 +1,134 @@
+COMMANDES UTILES - TP DHCP (tests et preuves)
+
+--- CÔTÉ SERVEUR (Debian) ---
+
+# Vérifier l'état du service
+sudo systemctl status isc-dhcp-server
+
+# Redémarrer le service après une modif de dhcpd.conf
+sudo systemctl restart isc-dhcp-server
+
+# Voir les logs en temps réel (laisser tourner pendant un test côté client)
+sudo journalctl -u isc-dhcp-server -f
+
+# Tester la syntaxe de dhcpd.conf sans démarrer le service
+sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf
+
+# Voir le fichier des baux attribués (preuve d'attribution)
+cat /var/lib/dhcp/dhcpd.leases
+
+# Vérifier l'IP et l'état de l'interface serveur
+ip a
+ip link show ens33
+
+# Voir les compteurs de paquets bruts sur l'interface (pour vérifier qu'un
+# paquet arrive physiquement, indépendamment de dhcpd)
+ip -s link show ens33
+
+
+--- CAPTURE RÉSEAU (preuve DORA) ---
+
+# Capture simple, filtrée sur les ports DHCP (67 = serveur, 68 = client)
+sudo tcpdump -i ens33 -n port 67 or port 68
+
+# Capture avec adresses MAC affichées (utile pour distinguer plusieurs clients)
+sudo tcpdump -i ens33 -n -e port 67 or port 68
+
+# Capture toutes interfaces confondues (si doute sur le nom d'interface)
+sudo tcpdump -i any -n port 67 or port 68
+
+# Enregistrer la capture dans un fichier pour analyse/relecture ensuite
+sudo tcpdump -i ens33 -n port 67 or port 68 -w capture_dora.pcap
+
+# Relire une capture enregistrée avec le détail complet
+tcpdump -r capture_dora.pcap -n -vv
+
+
+--- CÔTÉ CLIENT (Ubuntu) ---
+
+# Voir l'IP obtenue
+ip a
+
+# Voir la table de routage (passerelle reçue)
+ip route
+
+# Voir le(s) DNS reçu(s)
+resolvectl status
+# ou
+cat /etc/resolv.conf
+
+# Voir le nom et l'état de la connexion réseau
+nmcli connection show
+
+# Voir la méthode IPv4 configurée (doit être "auto" pour DHCP, pas "link-local"
+# ni "manual" — sinon le client n'émet jamais de requête DHCP)
+nmcli connection show netplan-ens33 | grep ipv4
+
+# Forcer la méthode DHCP si mal configurée
+sudo nmcli connection modify netplan-ens33 ipv4.method auto
+
+# Couper puis relancer la connexion (force un nouveau cycle DORA)
+sudo nmcli connection down netplan-ens33
+sudo nmcli connection up netplan-ens33
+
+# Voir l'adresse MAC du client (nécessaire pour la réservation côté serveur)
+ip link show ens33
+
+
+--- TEST DE RÉSERVATION MAC ---
+
+# 1. Récupérer la MAC du client à réserver (ip link show ens33)
+# 2. Ajouter dans /etc/dhcp/dhcpd.conf, en dehors du bloc subnet :
+#
+#    host client-reserve {
+#      hardware ethernet AA:BB:CC:DD:EE:FF;
+#      fixed-address 192.168.50.10;
+#    }
+#
+# 3. Redémarrer le service :
+sudo systemctl restart isc-dhcp-server
+
+# 4. Côté client, forcer un renouvellement et vérifier l'IP obtenue
+sudo nmcli connection down netplan-ens33
+sudo nmcli connection up netplan-ens33
+ip a
+
+# 5. Répéter le cycle down/up plusieurs fois pour prouver la constance de l'IP
+
+
+--- TEST NÉGATIF (service arrêté) ---
+
+# Côté serveur : arrêter le service
+sudo systemctl stop isc-dhcp-server
+
+# Côté client : forcer une demande, observer l'échec
+sudo nmcli connection down netplan-ens33
+sudo nmcli connection up netplan-ens33
+ip a
+# -> doit rester sans IP valide ou repasser en APIPA (169.254.x.x)
+
+# Côté serveur : relancer le service
+sudo systemctl start isc-dhcp-server
+
+# Côté client : redemander, observer le succès
+sudo nmcli connection down netplan-ens33
+sudo nmcli connection up netplan-ens33
+ip a
+
+
+--- DIAGNOSTIC RÉSEAU GÉNÉRAL (si ça ne communique pas) ---
+
+# Vérifier que les deux VMs sont sur le même vmnet
+# (VM -> Settings -> Network Adapter -> doit afficher "Custom (vmnet1)" des DEUX côtés)
+
+# Vérifier le lien de l'interface (chercher LOWER_UP, absence de NO-CARRIER)
+ip link show ens33
+
+# Vérifier l'absence de pare-feu qui bloquerait le port 67/68
+sudo iptables -L -n -v
+sudo nft list ruleset
+sudo ufw status
+
+# Pinguer entre les deux VMs une fois les IP connues
+ping -c 3 192.168.50.1
+ping -c 3 192.168.50.100
