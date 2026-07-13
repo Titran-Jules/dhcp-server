@@ -74,7 +74,7 @@ bash :
     6) Vérifier ip link show ens36
     7) Si down, redemarrer et entrer dans la VM, bash : sudo ip link set ens36 up
     7) Recommencer l'étape 2, 3 et 4
-    8) Le message est clair : seul le CD est dans /etc/apt/sources.list, il faut ajouter les dépôts Debian officiels : sudo nano /etc/apt/sources.list
+    8) Seul le CD est dans /etc/apt/sources.list, il faut ajouter les dépôts Debian officiels : sudo nano /etc/apt/sources.list
     9) Ajouter cette ligne dedans : deb http://deb.debian.org/debian trixie main
     10) sauvegarder et quitter
     11) sudo apt update
@@ -103,9 +103,12 @@ sudo systemctl status isc-dhcp-server
 
  - Activer le démarrage auto : sudo systemctl enable isc-dhcp-server
  - Vérifier le fichier de baux (encore vide, normal, aucun client connecté) : cat /var/lib/dhcp/dhcpd.leases
-
+ - sudo apt install tcpdump -y
  - Eteignez la VM et effacer le NAT qu'on a configuré
 
 
 * Configuration UBUNTU (client)
+ - ram : 4-6 go
+ - mémoire : 20 go
+
 
